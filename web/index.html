@@ -45,6 +45,11 @@
 
 * { box-sizing: border-box; }
 
+/* A `display` set on a class beats the browser's own [hidden] rule, which is
+   how a hidden download button stayed on screen. Said once, here: hidden is
+   hidden, whatever else the element's class asks for. */
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
   font-family: var(--font-main);

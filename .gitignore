@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+# PyInstaller's scratch and output. Anchored, so nothing named build/ deeper in
+# the tree is swallowed. The .spec in packaging/ is source, not output.
+/build/
+/dist/
+# Documents converted while trying the app out.
+/output/

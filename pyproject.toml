@@ -1,0 +1,26 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+# Pinned explicitly rather than inherited.
+#
+# Ruff's default rule set has expanded between releases, which turns a green
+# pipeline red without a line of code changing. There is no Python toolchain on
+# the author's machine, so CI is the only place this code is checked -- lint
+# drifting under it is worse than useless. This repo's lint is about
+# correctness, not house style:
+#
+#   E4/E7/E9  imports, statements, syntax
+#   F         pyflakes -- undefined names, unused imports, the real bugs
+#   B         bugbear -- mutable defaults, except-without-raise, and friends
+#
+# F alone would have caught both bugs that kept the first upload from ever
+# running: a QApplication that was used but never imported, and an f-string
+# broken across two lines.
+select = ["E4", "E7", "E9", "F", "B"]
+
+[tool.pytest.ini_options]
+# The package is not pip-installed in CI, so the repo root has to be importable.
+pythonpath = ["."]
+testpaths = ["tests"]

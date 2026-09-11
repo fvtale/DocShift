@@ -1,2 +1,14 @@
-PySide6
-pdf2docx
+# Everything DocShift needs to run. CI installs exactly this list, and the
+# Windows job bundles exactly this list into DocShift.exe -- every line here
+# ships to every user, so keep it short.
+
+# The window. PySide6-Essentials is QtCore, QtGui and QtWidgets. The full
+# PySide6 package adds WebEngine, QML, 3D and multimedia on top, roughly
+# tripling the install, and none of it is used here.
+PySide6-Essentials>=6.7,<7
+
+# The conversion. It brings PyMuPDF to read the PDF, python-docx to write the
+# DOCX, and NumPy and OpenCV to find tables and images. The tests use PyMuPDF
+# and python-docx directly as well, which is safe: pdf2docx cannot run without
+# either of them.
+pdf2docx>=0.5.13,<0.6

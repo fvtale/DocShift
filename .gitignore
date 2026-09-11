@@ -12,3 +12,5 @@ venv/
 /dist/
 # Documents converted while trying the app out.
 /output/
+# The web build's only dev dependency: Pyodide, pinned in web/package-lock.json.
+/web/node_modules/

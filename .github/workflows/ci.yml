@@ -56,7 +56,7 @@ jobs:
           pip install pytest ruff
 
       - name: Lint
-        run: ruff check docshift tests packaging
+        run: ruff check docshift tests packaging web
 
       - name: Import every module
         # Catches syntax errors and bad imports in paths the tests do not
@@ -119,4 +119,39 @@ jobs:
         with:
           name: DocShift-windows
           path: release/
+          if-no-files-found: error
+
+  web:
+    name: datarail.org/docshift
+    needs: test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Build the page
+        run: npm run build
+
+      - name: The page converts a real PDF
+        # dist/web is what gets deployed, and this runs it on the same Pyodide
+        # release the page loads from jsDelivr. Everything under the DOM -- the
+        # wheels, DocShift's engine, the conversion -- is what a visitor runs.
+        run: npm test
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: DocShift-web
+          # Copied into datarail-site/public/docshift to deploy it.
+          path: dist/web/
           if-no-files-found: error

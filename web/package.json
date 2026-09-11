@@ -1,0 +1,14 @@
+{
+  "name": "docshift-web",
+  "private": true,
+  "description": "DocShift in the browser: the page behind datarail.org/docshift",
+  "type": "module",
+  "scripts": {
+    "build": "node build.js",
+    "test": "node smoke.js ../dist/web",
+    "serve": "node serve.js"
+  },
+  "devDependencies": {
+    "pyodide": "314.0.6"
+  }
+}

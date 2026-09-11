@@ -6,7 +6,7 @@ red interface. Nothing is uploaded, nothing is metered, and it stays free.
 | | |
 | --- | --- |
 | **Converts** | PDF → DOCX |
-| **Runs on** | Windows, as a single `.exe` — or anywhere Python and Qt run |
+| **Runs on** | Windows, as a single `.exe`; any browser, at [datarail.org/docshift](https://datarail.org/docshift); anywhere Python and Qt run |
 | **Costs** | Nothing, forever. The source is [public domain](LICENSE) |
 
 ---
@@ -20,6 +20,14 @@ documents to someone else's server. DocShift does it locally, for free.
 ---
 
 ## Get it
+
+### In your browser, nothing to install
+
+[**datarail.org/docshift**](https://datarail.org/docshift) converts without
+installing anything. The page loads the same converter into your browser and
+runs it there, so the PDF is never uploaded — there is no server to upload it
+to. The first conversion downloads about 38 MB of Python and PDF libraries,
+once.
 
 ### Windows, no Python needed
 
@@ -95,6 +103,30 @@ The result is `dist\DocShift.exe`. The last line proves it converts a real PDF.
 
 ---
 
+## The browser version
+
+[datarail.org/docshift](https://datarail.org/docshift) is this same engine
+compiled to WebAssembly. The page loads [Pyodide](https://pyodide.org) into a
+Web Worker and runs `docshift/core/convert.py` there unchanged, alongside
+Pyodide's own builds of PyMuPDF, OpenCV and NumPy. The two pure-Python pieces
+it still needs — pdf2docx and python-docx — are served with the page, pinned
+and checked against the SHA-256 that PyPI publishes for them.
+
+```bash
+cd web
+npm install
+npm run build     # stages dist/web, the folder that gets deployed
+npm test          # converts a real PDF through it, in Node
+npm run serve     # http://localhost:8765/docshift/, with the live site's assets
+```
+
+CI does the first two on every push and uploads `dist/web` as the
+**DocShift-web** artifact. To publish it, copy that folder to
+`public/docshift/` in [datarail-site](https://github.com/fvtale/datarail-site),
+whose own workflow uploads it to the webspace.
+
+---
+
 ## Layout
 
 ```
@@ -113,6 +145,15 @@ packaging/
   build_exe.bat    builds it on a Windows machine
   smoke_test.py    converts a real PDF with a build, as CI does
   make_icon.py     redraws docshift.ico
+web/
+  index.html       the page at datarail.org/docshift
+  app.js           choosing a file, the progress line, the download
+  worker.js        the Web Worker that Python runs in
+  engine.js        boots Pyodide; shared by the page and by CI's test
+  docshift_web.py  the browser's side of one conversion
+  build.js         stages dist/web, the folder that gets deployed
+  smoke.js         converts a real PDF through the built page, in Node
+  serve.js         npm run serve, to preview the built page
 tests/
 ```
 
@@ -131,8 +172,12 @@ them — PyMuPDF, which reads the PDF — is AGPL v3, so the .exe as a whole is
 distributed under the AGPL v3. It stays free to use, share and change. See
 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
+The browser version loads that same PyMuPDF into your browser, so the same
+applies there; the page lists everything it loads and under what licence.
+
 ---
 
 Nothing here is built or run on the author's machine — there is no local
 Python toolchain. **CI is the only thing that tests DocShift, and the only
-thing that builds DocShift.exe.** A red CI run is a broken download.
+thing that builds DocShift.exe and the page behind datarail.org/docshift.**
+A red CI run is a broken download.

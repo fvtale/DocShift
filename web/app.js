@@ -1,7 +1,10 @@
 // The page's side of DocShift: choosing a file, showing progress, handing
 // back the DOCX. All the Python runs in worker.js; this file only talks to it.
 
-const DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const TYPES = {
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  pdf: "application/pdf",
+};
 
 const $ = (id) => document.getElementById(id);
 const ui = {
@@ -67,11 +70,21 @@ function size(bytes) {
     : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-// The same test as check_pdf() in docshift/core/convert.py: a PDF header in
-// the first kilobyte, whatever the file is called.
-async function looksLikePdf(file) {
-  const head = new Uint8Array(await file.slice(0, 1024).arrayBuffer());
-  return new TextDecoder("latin1").decode(head).includes("%PDF-");
+// Which way this file would convert, decided the way check_input() decides it
+// in docshift/core/convert.py: on the file's first bytes, never on its name.
+// Done here so a file that is neither is refused before 38 MB of converter
+// downloads on its behalf.
+async function sniff(file) {
+  const head = new Uint8Array(await file.slice(0, 64 * 1024).arrayBuffer());
+  const text = new TextDecoder("latin1").decode(head);
+  if (text.slice(0, 1024).includes("%PDF-")) return "Convert to DOCX";
+  if (head[0] === 0x50 && head[1] === 0x4b) {
+    // Every Office file is a zip, so being one proves nothing. Word keeps its
+    // main part near the front, which names a .docx without unzipping it; any
+    // other zip still goes to the engine, which says exactly what it is.
+    return text.includes("word/document.xml") ? "Convert to PDF" : "Convert";
+  }
+  return null;
 }
 
 function startWorker() {
@@ -132,7 +145,8 @@ function finish(result) {
     return;
   }
 
-  downloadUrl = URL.createObjectURL(new Blob([result.docx], { type: DOCX_TYPE }));
+  const type = TYPES[result.kind] ?? "application/octet-stream";
+  downloadUrl = URL.createObjectURL(new Blob([result.data], { type }));
   ui.download.href = downloadUrl;
   ui.download.download = result.name;
   ui.download.textContent = `Download ${result.name}`;
@@ -140,10 +154,17 @@ function finish(result) {
   ui.done.hidden = false;
   say(`Done: ${result.name}, ${result.pages} page${result.pages === 1 ? "" : "s"}.`);
 
+  // Whatever did not survive the conversion, in the same words the app uses.
+  const gaps = [...(result.notes ?? [])];
   if (result.missing_count) {
     const missing = result.missing.charAt(0).toUpperCase() + result.missing.slice(1);
     const verb = result.missing_count === 1 ? "is" : "are";
-    ui.gaps.textContent = `${missing} could not be converted and ${verb} missing from the DOCX.`;
+    gaps.unshift(
+      `${missing} could not be converted and ${verb} missing from the ${result.kind.toUpperCase()}.`,
+    );
+  }
+  if (gaps.length) {
+    ui.gaps.textContent = gaps.join(" ");
     ui.gaps.hidden = false;
   }
   ui.download.focus();
@@ -177,14 +198,16 @@ async function choose(file) {
   ui.picked.textContent = `${file.name} · ${size(file.size)}`;
   ui.picked.hidden = false;
 
-  // Refused here, before the converter downloads for nothing.
-  if (!(await looksLikePdf(file))) {
-    say("That file is not a PDF.");
-    showError(`${file.name} is not a PDF.`);
+  const label = await sniff(file);
+  if (label === null) {
+    ui.convert.textContent = "Convert";
+    say("That file is neither a PDF nor a Word document.");
+    showError(`${file.name} is not a PDF or a Word document.`);
     return;
   }
 
   chosen = file;
+  ui.convert.textContent = label;
   ui.convert.disabled = false;
   // Start loading now, while they reach for the button.
   startWorker();

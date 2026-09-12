@@ -16,9 +16,9 @@ this repository, plus the projects linked below.
 | OpenSSL | hashing, via Python | Apache-2.0 | https://github.com/openssl/openssl |
 | PySide6 (Qt) | the window | LGPL-3.0 | https://code.qt.io/cgit/pyside/pyside-setup.git/ |
 | shiboken6 | Qt's Python bindings | LGPL-3.0 | https://code.qt.io/cgit/pyside/pyside-setup.git/ |
-| pdf2docx | the conversion | MIT | https://github.com/ArtifexSoftware/pdf2docx |
-| PyMuPDF (MuPDF) | reading the PDF | AGPL-3.0 | https://github.com/pymupdf/PyMuPDF |
-| python-docx | writing the DOCX | MIT | https://github.com/python-openxml/python-docx |
+| pdf2docx | converting PDF to DOCX | MIT | https://github.com/ArtifexSoftware/pdf2docx |
+| PyMuPDF (MuPDF) | reading PDFs, and drawing the pages of one converted from Word | AGPL-3.0 | https://github.com/pymupdf/PyMuPDF |
+| python-docx | reading and writing Word files | MIT | https://github.com/python-openxml/python-docx |
 | lxml | XML for python-docx | BSD-3-Clause | https://github.com/lxml/lxml |
 | NumPy | image analysis | BSD-3-Clause | https://github.com/numpy/numpy |
 | OpenCV | finding drawings and tables | Apache-2.0 | https://github.com/opencv/opencv-python |

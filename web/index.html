@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DocShift — PDF to DOCX in your browser, free</title>
-<meta name="description" content="Turn a PDF into an editable Word document right in your browser. Free, no sign-up, no page limits, and the file never leaves your computer.">
+<title>DocShift — PDF and Word conversion in your browser, free</title>
+<meta name="description" content="Turn a PDF into an editable Word document, or a Word document into a PDF, right in your browser. Free, no sign-up, no page limits, and the file never leaves your computer.">
 <meta name="color-scheme" content="dark">
 <link rel="icon" href="favicon.ico">
 <link rel="stylesheet" href="/assets/circuit.css">
@@ -236,28 +236,28 @@ footer p { margin: 0; max-width: 70ch; line-height: 1.55; }
 <div class="hero">
   <div class="shell">
     <div class="label">DocShift</div>
-    <h1>PDF to DOCX, right in your browser.</h1>
+    <h1>PDF to Word, Word to PDF, right in your browser.</h1>
     <p class="lede">
-      Turn a PDF into an editable Word document. <strong>Free, with no sign-up
-      and no page limits, and the file never leaves your computer.</strong>
-      The conversion runs here, in this tab.
+      Turn a PDF into an editable Word document, or a Word document into a PDF.
+      <strong>Free, with no sign-up and no page limits, and the file never leaves
+      your computer.</strong> The conversion runs here, in this tab.
     </p>
 
     <div class="converter" id="converter" aria-labelledby="converter-title">
       <div class="working" id="working" hidden></div>
-      <h2 id="converter-title">PDF to DOCX</h2>
+      <h2 id="converter-title">PDF ↔ DOCX</h2>
       <p class="sub">Minimal conversion, dark interface, fast workflow.</p>
 
       <label class="drop" id="drop">
-        <input class="sr-only" type="file" id="file" accept="application/pdf,.pdf">
-        <strong>Drop a PDF here, or choose one</strong>
+        <input class="sr-only" type="file" id="file" accept=".pdf,.docx,.docm,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+        <strong>Drop a PDF or Word file here, or choose one</strong>
         <span class="hint">It stays on this computer. Nothing is uploaded.</span>
         <span class="picked" id="picked" hidden></span>
       </label>
 
       <div class="actions">
         <p class="status" id="status" role="status" aria-live="polite">Ready.</p>
-        <button class="button" type="button" id="convert" disabled>Convert to DOCX</button>
+        <button class="button" type="button" id="convert" disabled>Convert</button>
       </div>
 
       <div class="outcome" id="outcome" hidden>
@@ -289,8 +289,8 @@ footer p { margin: 0; max-width: 70ch; line-height: 1.55; }
     <p class="intro">
       Online converters work by uploading your document to their server. DocShift
       brings the converter to the document instead: this page loads it into your
-      browser, and the PDF is read and the Word file written without either one
-      going anywhere.
+      browser, and your file is read and the converted one written without either
+      of them going anywhere.
     </p>
     <div class="points">
       <div class="point">
@@ -302,13 +302,19 @@ footer p { margin: 0; max-width: 70ch; line-height: 1.55; }
         <h3>Same engine as the app</h3>
         <p>The code that converts here is, line for line, the code inside DocShift
           for Windows, including its checks for damaged, password-protected and
-          not-really-PDF files.</p>
+          mislabelled files.</p>
       </div>
       <div class="point">
         <h3>Honest about gaps</h3>
-        <p>If a page cannot be converted, the rest still are, and DocShift says
-          which page is missing instead of quietly handing back a shorter
-          document.</p>
+        <p>If a page cannot be converted, or a header cannot be drawn, the rest
+          still are and DocShift names what is missing instead of quietly handing
+          back less than you gave it.</p>
+      </div>
+      <div class="point">
+        <h3>Word to PDF, without Word</h3>
+        <p>Nothing here owns a copy of Word, so DocShift draws the document
+          itself: headings, formatting, lists, tables, pictures, page size and
+          breaks. Headers, footers and footnotes it cannot draw, and says so.</p>
       </div>
       <div class="point">
         <h3>Free, for good</h3>
@@ -326,11 +332,18 @@ footer p { margin: 0; max-width: 70ch; line-height: 1.55; }
     <div class="label">Windows app</div>
     <h2>Rather have an app?</h2>
     <p class="intro">
-      DocShift for Windows is the same converter as a single program: nothing to
-      download on each visit, faster on long documents, and it works offline.
+      DocShift for Windows is the same converter as a single program: both
+      directions, nothing to download on each visit, faster on long documents,
+      and it works offline.
     </p>
-    <p style="margin: 22px 0 0;">
-      <a class="button quiet" href="https://github.com/fvtale/DocShift">DocShift on GitHub</a>
+    <p style="margin: 22px 0 0; display: flex; gap: 12px; flex-wrap: wrap;">
+      <a class="button" href="https://github.com/fvtale/DocShift/releases/latest/download/DocShift-windows.zip">Download for Windows</a>
+      <a class="button quiet" href="https://github.com/fvtale/DocShift">Source on GitHub</a>
+    </p>
+    <p class="fine">
+      Unzip it and run <code>DocShift.exe</code> — there is no installer. The
+      first time, Windows SmartScreen warns about an unknown publisher, because
+      the file is not code-signed: <strong>More info → Run anyway</strong>.
     </p>
   </div>
 </section>
@@ -357,7 +370,7 @@ footer p { margin: 0; max-width: 70ch; line-height: 1.55; }
           <tr><td><a href="https://github.com/python/cpython">Python</a></td><td>the language itself</td><td>PSF-2.0</td></tr>
           <tr><td><a href="https://github.com/ArtifexSoftware/pdf2docx">pdf2docx</a></td><td>the conversion</td><td>MIT</td></tr>
           <tr><td><a href="https://github.com/pymupdf/PyMuPDF">PyMuPDF</a> (MuPDF)</td><td>reading the PDF</td><td>AGPL-3.0</td></tr>
-          <tr><td><a href="https://github.com/python-openxml/python-docx">python-docx</a></td><td>writing the DOCX</td><td>MIT</td></tr>
+          <tr><td><a href="https://github.com/python-openxml/python-docx">python-docx</a></td><td>reading and writing Word files</td><td>MIT</td></tr>
           <tr><td><a href="https://github.com/opencv/opencv">OpenCV</a></td><td>finding drawings and tables</td><td>Apache-2.0</td></tr>
           <tr><td><a href="https://github.com/numpy/numpy">NumPy</a></td><td>image analysis</td><td>BSD-3-Clause</td></tr>
           <tr><td><a href="https://github.com/lxml/lxml">lxml</a></td><td>XML for python-docx</td><td>BSD-3-Clause</td></tr>

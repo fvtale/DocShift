@@ -31,6 +31,8 @@ const PYTHON = {
   "docshift/__init__.py": join(ROOT, "docshift", "__init__.py"),
   "docshift/core/__init__.py": join(ROOT, "docshift", "core", "__init__.py"),
   "docshift/core/convert.py": join(ROOT, "docshift", "core", "convert.py"),
+  "docshift/core/pdf_to_docx.py": join(ROOT, "docshift", "core", "pdf_to_docx.py"),
+  "docshift/core/docx_to_pdf.py": join(ROOT, "docshift", "core", "docx_to_pdf.py"),
   "docshift_web.py": join(WEB, "docshift_web.py"),
 };
 

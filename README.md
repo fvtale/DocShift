@@ -1,11 +1,11 @@
 # DocShift
 
-Free PDF to DOCX conversion, on your own machine, with a minimalist black and
-red interface. Nothing is uploaded, nothing is metered, and it stays free.
+Free document conversion, on your own machine, with a minimalist black and red
+interface. Nothing is uploaded, nothing is metered, and it stays free.
 
 | | |
 | --- | --- |
-| **Converts** | PDF → DOCX |
+| **Converts** | PDF → Word, and Word → PDF |
 | **Runs on** | Windows, as a single `.exe`; any browser, at [datarail.org/docshift](https://datarail.org/docshift); anywhere Python and Qt run |
 | **Costs** | Nothing, forever. The source is [public domain](LICENSE) |
 
@@ -31,13 +31,15 @@ once.
 
 ### Windows, no Python needed
 
-CI builds `DocShift.exe` on every push to `main`.
+**[Download DocShift-windows.zip](https://github.com/fvtale/DocShift/releases/latest/download/DocShift-windows.zip)**,
+unzip it, and run `DocShift.exe`. No installer, no Python, nothing to sign up
+for.
 
-1. Open the [CI runs](https://github.com/fvtale/DocShift/actions/workflows/ci.yml)
-   and click the latest green run on `main`.
-2. Under **Artifacts**, download **DocShift-windows** (GitHub asks you to sign
-   in first) and unzip it.
-3. Run `DocShift.exe`.
+Every release is built and smoke-tested by CI from a tag; see
+[Releasing](#releasing). For the build of a commit that has no release yet, open
+the [CI runs](https://github.com/fvtale/DocShift/actions/workflows/ci.yml), click
+a green run, and take the **DocShift-windows** artifact (GitHub asks you to sign
+in for those).
 
 The .exe is not code-signed, so Windows SmartScreen warns about an unknown
 publisher the first time. **More info → Run anyway.** It takes a few seconds to
@@ -56,29 +58,39 @@ python -m docshift
 
 ## Using it
 
-Pick a PDF, optionally pick a folder, and press **Convert to DOCX**.
+Pick a file, optionally pick a folder, and press **Convert**. A PDF becomes a
+Word document; a Word document becomes a PDF. Which way it goes is read from
+the file itself, not from its name, and the button says which before you press
+it.
 
-- The DOCX is saved beside the PDF unless you choose a folder.
-- **An existing DOCX is never overwritten.** The new one is saved as
+- The converted file is saved beside the original unless you choose a folder.
+- **An existing file is never overwritten.** The new one is saved as
   `report (1).docx`, then `report (2).docx`, and so on.
-- A file that is missing, damaged, password-protected, or not really a PDF is
-  refused with a message saying which. Nothing half-written is left behind.
+- A file that is missing, damaged, password-protected, or neither a PDF nor a
+  Word document is refused with a message saying which. Nothing half-written is
+  left behind.
 - If a page cannot be converted, the rest still are — and DocShift tells you
   which page is missing, rather than quietly handing you a shorter document.
+- **Word to PDF is drawn by DocShift, not by Word.** Headings, bold and italic,
+  fonts, sizes and colours, alignment, lists, tables, pictures, links, page
+  breaks and the document's paper size all carry over. Headers, footers,
+  footnotes, columns, text boxes and tracked changes do not — and DocShift says
+  which of them it dropped instead of letting you find out later.
 - The window stays responsive while it works. Closing it mid-conversion lets
   the conversion finish first.
-- Dropping a PDF onto `DocShift.exe`, or **Open with → DocShift**, opens the
-  window with that file filled in.
+- Dropping a PDF or Word file onto `DocShift.exe`, or **Open with →
+  DocShift**, opens the window with that file filled in.
 
 ### Command line
 
 ```bash
 python -m docshift report.pdf                    # report.docx, beside it
-python -m docshift *.pdf --output converted/     # many at once, into a folder
+python -m docshift letter.docx                   # letter.pdf, beside it
+python -m docshift *.pdf *.docx -o converted/    # many at once, into a folder
 python -m docshift report.pdf --overwrite        # replace report.docx
 ```
 
-Each DOCX written is printed on its own line, and nothing else goes to stdout.
+Each file written is printed on its own line, and nothing else goes to stdout.
 Exit code 0 when every file converted, 1 when any failed, 2 for a usage error.
 `--verbose` shows the conversion engine's progress.
 
@@ -99,7 +111,25 @@ pyinstaller --noconfirm --clean packaging/docshift.spec
 python packaging/smoke_test.py dist/DocShift.exe
 ```
 
-The result is `dist\DocShift.exe`. The last line proves it converts a real PDF.
+The result is `dist\DocShift.exe`. The last line proves it converts a real PDF
+ and a real Word document.
+
+---
+
+## Releasing
+
+A tag publishes the Windows build where anyone can download it, at a URL that
+never changes:
+
+```bash
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+`.github/workflows/release.yml` then runs the tests, builds the .exe, makes it
+convert a real PDF and a real Word document, and attaches
+`DocShift-windows.zip` — the .exe, `LICENSE` and `THIRD-PARTY-NOTICES.md` — to
+a GitHub release. Nothing is published that has not converted something first.
 
 ---
 
@@ -107,7 +137,7 @@ The result is `dist\DocShift.exe`. The last line proves it converts a real PDF.
 
 [datarail.org/docshift](https://datarail.org/docshift) is this same engine
 compiled to WebAssembly. The page loads [Pyodide](https://pyodide.org) into a
-Web Worker and runs `docshift/core/convert.py` there unchanged, alongside
+Web Worker and runs `docshift/core` there unchanged, alongside
 Pyodide's own builds of PyMuPDF, OpenCV and NumPy. The two pure-Python pieces
 it still needs — pdf2docx and python-docx — are served with the page, pinned
 and checked against the SHA-256 that PyPI publishes for them.
@@ -116,7 +146,7 @@ and checked against the SHA-256 that PyPI publishes for them.
 cd web
 npm install
 npm run build     # stages dist/web, the folder that gets deployed
-npm test          # converts a real PDF through it, in Node
+npm test          # converts a PDF and a Word file through it, in Node
 npm run serve     # http://localhost:8765/docshift/, with the live site's assets
 ```
 
@@ -134,7 +164,9 @@ docshift/
   __main__.py      python -m docshift: the window, or the command line
   cli.py           the command line
   core/
-    convert.py     PDF to DOCX; the only file that imports pdf2docx
+    convert.py     what converts to what, and the rules both directions keep
+    pdf_to_docx.py PDF to DOCX; the only file that imports pdf2docx
+    docx_to_pdf.py DOCX to PDF, drawn without Word
   gui/
     app.py         starts Qt
     window.py      the window, and the thread that keeps it responsive
@@ -143,7 +175,7 @@ docshift/
 packaging/
   docshift.spec    PyInstaller recipe for DocShift.exe
   build_exe.bat    builds it on a Windows machine
-  smoke_test.py    converts a real PDF with a build, as CI does
+  smoke_test.py    converts real files with a build, both ways, as CI does
   make_icon.py     redraws docshift.ico
 web/
   index.html       the page at datarail.org/docshift
@@ -152,7 +184,7 @@ web/
   engine.js        boots Pyodide; shared by the page and by CI's test
   docshift_web.py  the browser's side of one conversion
   build.js         stages dist/web, the folder that gets deployed
-  smoke.js         converts a real PDF through the built page, in Node
+  smoke.js         converts real files through the built page, in Node
   serve.js         npm run serve, to preview the built page
 tests/
 ```

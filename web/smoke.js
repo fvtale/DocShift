@@ -1,11 +1,12 @@
-// Proves the built page converts a real PDF, the way datarail.org/docshift will.
+// Proves the built page converts real files, both ways, as datarail.org/docshift will.
 //
 //   cd web && npm run build && npm test
 //
 // Runs the bundle in dist/web -- the exact files that get deployed -- on the
-// same Pyodide release the page loads from jsDelivr, with the same sample PDF
-// packaging/smoke_test.py feeds the desktop builds: text on two pages, an
-// image, and the drawings pdf2docx can only clip with OpenCV.
+// same Pyodide release the page loads from jsDelivr, with the same samples
+// packaging/smoke_test.py feeds the desktop builds: a PDF with text on two
+// pages, an image and the drawings pdf2docx can only clip with OpenCV, and a
+// Word document with a heading, a list, a table and a picture.
 
 import { readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
@@ -37,27 +38,31 @@ const engine = await startEngine({
 console.log(`engine ready in ${((Date.now() - started) / 1000).toFixed(1)}s`);
 const { pyodide } = engine;
 
-// The sample PDF, drawn by the desktop smoke test's own make_pdf().
+// Both samples come from the desktop smoke test, so the page and the .exe are
+// held to the same documents.
 pyodide.FS.writeFile("/tmp/smoke_test.py", await readFile(join(ROOT, "packaging", "smoke_test.py")));
-const pdf = pyodide.runPython(`
+const [pdf, docx] = pyodide.runPython(`
 import sys
 from pathlib import Path
 sys.path.insert(0, "/tmp")
 import smoke_test
 smoke_test.make_pdf(Path("/tmp/sample.pdf"))
-Path("/tmp/sample.pdf").read_bytes()
+smoke_test.make_docx(Path("/tmp/letter.docx"))
+[Path("/tmp/sample.pdf").read_bytes(), Path("/tmp/letter.docx").read_bytes()]
 `).toJs();
 
+// -- PDF to DOCX --------------------------------------------------------------
+
 const progress = [];
-const converted = Date.now();
-const result = engine.convert("sample.pdf", pdf, (line) => progress.push(line));
-if (!result.ok) fail(`converting a real PDF failed: ${result.message}`);
-if (result.name !== "sample.docx") fail(`expected sample.docx, got ${result.name}`);
-if (result.pages !== 2 || result.missing_count !== 0) {
-  fail(`expected 2 complete pages, got ${result.pages} with ${result.missing_count} missing`);
+let clock = Date.now();
+const toDocx = engine.convert("sample.pdf", pdf, (line) => progress.push(line));
+if (!toDocx.ok) fail(`converting a real PDF failed: ${toDocx.message}`);
+if (toDocx.name !== "sample.docx") fail(`expected sample.docx, got ${toDocx.name}`);
+if (toDocx.pages !== 2 || toDocx.missing_count !== 0) {
+  fail(`expected 2 complete pages, got ${toDocx.pages} with ${toDocx.missing_count} missing`);
 }
 
-pyodide.FS.writeFile("/tmp/out.docx", result.docx);
+pyodide.FS.writeFile("/tmp/out.docx", toDocx.data);
 const [hasFirst, hasSecond, images] = pyodide.runPython(`
 import docx
 document = docx.Document("/tmp/out.docx")
@@ -67,16 +72,41 @@ images = sum("image" in rel.reltype for rel in document.part.rels.values())
 `).toJs();
 if (!hasFirst || !hasSecond) fail("text from the PDF is missing from the DOCX");
 if (images < 2) fail(`expected the image plus the drawings OpenCV clips, found ${images} image(s)`);
-console.log(`converted in ${((Date.now() - converted) / 1000).toFixed(1)}s: ` +
-  `text from both pages, and ${images} images, ${result.docx.length} bytes`);
+console.log(`PDF to DOCX in ${((Date.now() - clock) / 1000).toFixed(1)}s: ` +
+  `text from both pages, and ${images} images, ${toDocx.data.length} bytes`);
 
-for (const expected of ["Opening the PDF", "Reading page 1 of 2", "Writing the DOCX", "Writing page 2 of 2"]) {
-  if (!progress.includes(expected)) fail(`progress never said "${expected}"; it said: ${progress.join(" | ")}`);
+for (const expected of ["Opening the PDF", "Reading page 1 of 2", "Writing the DOCX"]) {
+  if (!progress.includes(expected)) fail(`progress never said "${expected}": ${progress.join(" | ")}`);
 }
 console.log(`progress reported: ${progress.join(" > ")}`);
 
-const refused = engine.convert("fake.pdf", new TextEncoder().encode("not a pdf"));
-if (refused.ok || refused.message !== "fake.pdf is not a PDF.") {
-  fail(`a file that is not a PDF was not refused properly: ${JSON.stringify(refused)}`);
+// -- DOCX to PDF --------------------------------------------------------------
+
+clock = Date.now();
+const toPdf = engine.convert("letter.docx", docx);
+if (!toPdf.ok) fail(`converting a real Word document failed: ${toPdf.message}`);
+if (toPdf.name !== "letter.pdf") fail(`expected letter.pdf, got ${toPdf.name}`);
+if (toPdf.kind !== "pdf") fail(`expected a pdf, got ${toPdf.kind}`);
+
+pyodide.FS.writeFile("/tmp/out.pdf", toPdf.data);
+const [drawn, pictures] = pyodide.runPython(`
+import pymupdf
+with pymupdf.open("/tmp/out.pdf") as document:
+    text = " ".join(" ".join(page.get_text().split()) for page in document)
+    pictures = sum(len(page.get_images()) for page in document)
+[text, pictures]
+`).toJs();
+for (const line of ["Shifted by DocShift", "The second paragraph survives", "New York"]) {
+  if (!drawn.includes(line)) fail(`"${line}" is missing from the PDF`);
 }
-console.log(`a file that is not a PDF is refused: "${refused.message}"`);
+if (!pictures) fail("the picture is missing from the PDF");
+console.log(`DOCX to PDF in ${((Date.now() - clock) / 1000).toFixed(1)}s: ` +
+  `its text, its table, and ${pictures} picture(s), ${toPdf.data.length} bytes`);
+
+// -- what it refuses ----------------------------------------------------------
+
+const refused = engine.convert("notes.pdf", new TextEncoder().encode("not a pdf"));
+if (refused.ok || refused.message !== "notes.pdf is not a PDF or a Word document.") {
+  fail(`a file that is neither was not refused properly: ${JSON.stringify(refused)}`);
+}
+console.log(`a file that is neither is refused: "${refused.message}"`);

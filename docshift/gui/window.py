@@ -1,8 +1,8 @@
-"""The DocShift window: one PDF in, one DOCX out.
+"""The DocShift window: one file in, the other format out.
 
-The conversion runs on a worker thread. pdf2docx takes seconds per page on a
-long document, and the first version ran it on the UI thread, where Windows
-marks the window "Not Responding" and offers to kill it.
+The conversion runs on a worker thread. A long document takes seconds per page,
+and the first version ran it on the UI thread, where Windows marks the window
+"Not Responding" and offers to kill it.
 """
 
 from __future__ import annotations
@@ -25,8 +25,21 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docshift.core.convert import ConversionError, Result, describe_pages, pdf_to_docx
+from docshift.core.convert import (
+    ConversionError,
+    Result,
+    check_input,
+    convert,
+    describe_pages,
+)
 from docshift.gui.style import APP_STYLE
+
+FILTER = (
+    "PDF and Word files (*.pdf *.docx *.docm);;"
+    "PDF files (*.pdf);;"
+    "Word files (*.docx *.docm);;"
+    "All files (*)"
+)
 
 
 class ConversionThread(QThread):
@@ -41,18 +54,18 @@ class ConversionThread(QThread):
     succeeded = Signal(object)  # a Result
     failed = Signal(str)
 
-    def __init__(self, pdf: str, output_dir: str | None, parent: QWidget | None = None) -> None:
+    def __init__(self, source: str, output_dir: str | None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.pdf = pdf
+        self.source = source
         self.output_dir = output_dir
 
     def run(self) -> None:
         try:
-            result = pdf_to_docx(self.pdf, self.output_dir)
+            result = convert(self.source, self.output_dir)
         except ConversionError as exc:
             self.failed.emit(str(exc))
         except Exception as exc:
-            # A bug, not a bad PDF -- but it still has to reach the user. An
+            # A bug, not a bad file -- but it still has to reach the user. An
             # exception escaping run() ends the thread without a word, and the
             # window would sit on "Converting..." forever.
             self.failed.emit(f"Something went wrong inside DocShift: {exc!r}")
@@ -90,7 +103,7 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(26, 26, 26, 26)
         layout.setSpacing(18)
 
-        title = QLabel("PDF to DOCX")
+        title = QLabel("PDF ↔ DOCX")
         title.setObjectName("Title")
         subtitle = QLabel("Minimal conversion, dark interface, fast workflow.")
         subtitle.setObjectName("Subtitle")
@@ -102,22 +115,23 @@ class MainWindow(QMainWindow):
         grid.setHorizontalSpacing(12)
         grid.setVerticalSpacing(12)
 
-        self.pdf_edit = QLineEdit()
-        self.pdf_edit.setPlaceholderText("Select a PDF file...")
-        self.pdf_btn = QPushButton("Browse")
-        self.pdf_btn.clicked.connect(self.pick_pdf)
+        self.source_edit = QLineEdit()
+        self.source_edit.setPlaceholderText("Select a PDF or Word file...")
+        self.source_edit.textChanged.connect(self._show_direction)
+        self.source_btn = QPushButton("Browse")
+        self.source_btn.clicked.connect(self.pick_file)
 
         self.out_edit = QLineEdit()
-        self.out_edit.setPlaceholderText("Same folder as the PDF")
+        self.out_edit.setPlaceholderText("Same folder as the file")
         self.out_btn = QPushButton()
         self.out_btn.setToolTip("Choose output folder")
         self.out_btn.setText("📁")
         self.out_btn.setFixedWidth(52)
         self.out_btn.clicked.connect(self.pick_output_folder)
 
-        grid.addWidget(QLabel("Input PDF"), 0, 0)
-        grid.addWidget(self.pdf_edit, 1, 0)
-        grid.addWidget(self.pdf_btn, 1, 1)
+        grid.addWidget(QLabel("Input file"), 0, 0)
+        grid.addWidget(self.source_edit, 1, 0)
+        grid.addWidget(self.source_btn, 1, 1)
         grid.addWidget(QLabel("Output Folder"), 2, 0)
         grid.addWidget(self.out_edit, 3, 0)
         grid.addWidget(self.out_btn, 3, 1)
@@ -127,7 +141,7 @@ class MainWindow(QMainWindow):
         bottom = QHBoxLayout()
         self.status = QLabel("Ready.")
         self.status.setObjectName("Status")
-        self.convert_btn = QPushButton("Convert to DOCX")
+        self.convert_btn = QPushButton("Convert")
         self.convert_btn.setObjectName("ConvertButton")
         self.convert_btn.clicked.connect(self.convert_file)
 
@@ -139,13 +153,13 @@ class MainWindow(QMainWindow):
     def converting(self) -> bool:
         return self._thread is not None
 
-    def set_pdf(self, path: str) -> None:
-        self.pdf_edit.setText(path)
+    def set_source(self, path: str) -> None:
+        self.source_edit.setText(path)
 
-    def pick_pdf(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Select PDF", "", "PDF Files (*.pdf)")
+    def pick_file(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "Select a PDF or Word file", "", FILTER)
         if path:
-            self.pdf_edit.setText(path)
+            self.source_edit.setText(path)
 
     def pick_output_folder(self) -> None:
         path = QFileDialog.getExistingDirectory(self, "Select Output Folder")
@@ -155,23 +169,48 @@ class MainWindow(QMainWindow):
     def convert_file(self) -> None:
         if self.converting:
             return
-        pdf = self.pdf_edit.text().strip()
+        source = self.source_edit.text().strip()
         output_dir = self.out_edit.text().strip() or None
 
-        if not pdf:
-            QMessageBox.warning(self, "Missing Info", "Please choose a PDF file.")
+        if not source:
+            QMessageBox.warning(self, "Missing Info", "Please choose a PDF or Word file.")
             return
 
         self._set_busy(True)
         self.status.setToolTip("")
-        self.status.setText(f"Converting {Path(pdf).name}...")
+        self.status.setText(f"Converting {Path(source).name}...")
 
-        thread = ConversionThread(pdf, output_dir, self)
+        thread = ConversionThread(source, output_dir, self)
         thread.succeeded.connect(self._keep_outcome)
         thread.failed.connect(self._keep_outcome)
         thread.finished.connect(self._conversion_finished)
         self._thread = thread
         thread.start()
+
+    def _show_direction(self) -> None:
+        """Name the direction on the button as soon as a file is chosen.
+
+        This reads the file's first bytes, which is what decides the direction
+        anyway, so a file that is neither a PDF nor a Word document says so here
+        rather than after the button is pressed.
+        """
+        if self.converting:
+            return
+        source = self.source_edit.text().strip()
+        if not source:
+            self.convert_btn.setText("Convert")
+            self.status.setText("Ready.")
+            return
+        try:
+            _, conversion = check_input(source)
+        except ConversionError as exc:
+            self.convert_btn.setText("Convert")
+            # Only complain about a file that is there. Anything else is a path
+            # still being typed, and being told off mid-word helps nobody.
+            self.status.setText(str(exc) if Path(source).exists() else "Ready.")
+            return
+        self.convert_btn.setText(f"Convert to {conversion.target_suffix.lstrip('.').upper()}")
+        self.status.setText(f"Ready: {conversion.name}.")
 
     @Slot(object)
     def _keep_outcome(self, outcome: Result | str) -> None:
@@ -199,24 +238,35 @@ class MainWindow(QMainWindow):
     def _report_success(self, result: Result) -> None:
         self.status.setText(f"Done: {result.output.name}")
         self.status.setToolTip(str(result.output))
-        if result.complete:
-            QMessageBox.information(self, "Success", f"Created:\n{result.output}")
-            return
-        missing = describe_pages(result.skipped)
-        verb = "is" if len(result.skipped) == 1 else "are"
-        QMessageBox.warning(
-            self,
-            "Converted, with gaps",
-            f"Created:\n{result.output}\n\n"
-            f"{missing.capitalize()} could not be converted and {verb} missing from the DOCX.",
-        )
+
+        told = [f"Created:\n{result.output}"]
+        if not result.complete:
+            missing = describe_pages(result.skipped)
+            verb = "is" if len(result.skipped) == 1 else "are"
+            told.append(
+                f"{missing.capitalize()} could not be converted and {verb} missing "
+                f"from the {result.conversion.target_suffix.lstrip('.').upper()}."
+            )
+        told.extend(result.notes)
+
+        if result.complete and not result.notes:
+            QMessageBox.information(self, "Success", told[0])
+        else:
+            QMessageBox.warning(self, "Converted, with gaps", "\n\n".join(told))
 
     def _report_failure(self, message: str) -> None:
         self.status.setText("Conversion failed.")
         QMessageBox.critical(self, "Error", message)
 
     def _set_busy(self, busy: bool) -> None:
-        for widget in (self.pdf_edit, self.pdf_btn, self.out_edit, self.out_btn, self.convert_btn):
+        widgets = (
+            self.source_edit,
+            self.source_btn,
+            self.out_edit,
+            self.out_btn,
+            self.convert_btn,
+        )
+        for widget in widgets:
             widget.setEnabled(not busy)
 
     def closeEvent(self, event: QCloseEvent) -> None:

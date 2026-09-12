@@ -1,9 +1,9 @@
 """DocShift's browser side: one conversion, bytes in and bytes out.
 
 Pyodide runs this in a Web Worker on datarail.org/docshift. It calls the same
-engine as the desktop app -- docshift.core.convert, unchanged -- on a file
-system that exists only in the browser tab's memory. The PDF is never uploaded:
-there is nowhere for it to go.
+engines as the desktop app -- docshift.core, unchanged -- on a file system that
+exists only in the browser tab's memory. The file is never uploaded: there is
+nowhere for it to go.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ import shutil
 from collections.abc import Callable
 from pathlib import Path
 
-from docshift.core.convert import ConversionError, describe_pages, pdf_to_docx
+from docshift.core.convert import ConversionError, convert, describe_pages
 
 WORK = Path("/tmp/docshift")
 
@@ -55,14 +55,14 @@ class _Progress(logging.Handler):
             self.report(f"{verb} page {page[1]} of {page[2]}")
 
 
-def convert(name: str, data: bytes, report: Callable[[str], None]) -> dict:
-    """Convert one PDF held in memory. Returns what the page needs to show."""
+def convert_bytes(name: str, data: bytes, report: Callable[[str], None]) -> dict:
+    """Convert one file held in memory. Returns what the page needs to show."""
     if hasattr(data, "to_bytes"):
         # A JavaScript Uint8Array, which is how the page hands the file over.
         data = data.to_bytes()
 
-    # One conversion at a time, and nothing from the last one kept around:
-    # a tab converting its tenth PDF should not be holding the other nine.
+    # One conversion at a time, and nothing from the last one kept around: a tab
+    # converting its tenth file should not still be holding the other nine.
     shutil.rmtree(WORK, ignore_errors=True)
     (WORK / "in").mkdir(parents=True)
     source = WORK / "in" / _file_name(name)
@@ -74,7 +74,7 @@ def convert(name: str, data: bytes, report: Callable[[str], None]) -> dict:
     root.addHandler(progress)
     root.setLevel(logging.INFO)
     try:
-        result = pdf_to_docx(source, WORK / "out")
+        result = convert(source, WORK / "out")
     except ConversionError as exc:
         return {"ok": False, "message": str(exc)}
     finally:
@@ -84,10 +84,13 @@ def convert(name: str, data: bytes, report: Callable[[str], None]) -> dict:
     return {
         "ok": True,
         "name": result.output.name,
-        "docx": result.output.read_bytes(),
+        "data": result.output.read_bytes(),
+        "kind": result.conversion.target_suffix.lstrip("."),
+        "direction": result.conversion.name,
         "pages": result.pages,
         "missing": describe_pages(result.skipped) if result.skipped else "",
         "missing_count": len(result.skipped),
+        "notes": list(result.notes),
     }
 
 
@@ -98,4 +101,4 @@ def _file_name(name: str) -> str:
     containing a slash or being empty.
     """
     cleaned = name.replace("/", "_").replace("\\", "_").replace("\x00", "").strip()
-    return cleaned if cleaned not in ("", ".", "..") else "document.pdf"
+    return cleaned if cleaned not in ("", ".", "..") else "document"

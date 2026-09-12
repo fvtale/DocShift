@@ -34,7 +34,7 @@ class TestConverting:
         assert main([str(bad), str(good)]) == 1
         captured = capsys.readouterr()
         assert captured.out == f"{tmp_path / 'good.docx'}\n"
-        assert "bad.pdf is not a PDF." in captured.err
+        assert "bad.pdf is not a PDF or a Word document." in captured.err
 
     def test_never_overwrites_unless_told(self, make_pdf, tmp_path, capsys):
         pdf = make_pdf(tmp_path / "report.pdf")

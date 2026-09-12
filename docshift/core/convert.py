@@ -1,39 +1,76 @@
-"""PDF to DOCX, and everything that can go wrong on the way.
+"""What DocShift converts, and the rules every conversion keeps.
 
-pdf2docx does the converting. This is the only module that imports it, and it
-exists to give the conversion the edges a desktop tool needs:
+Two directions, one entry point. `convert()` reads the file, works out what it
+is, and hands it to the engine that goes the other way:
 
-- A file that is missing, not a PDF, damaged or password-protected fails with
-  a sentence a person can act on, not a MuPDF traceback.
-- An existing DOCX is never replaced unless the caller asks. The new one takes
+    PDF  -> DOCX    core/pdf_to_docx.py, on pdf2docx
+    DOCX -> PDF     core/docx_to_pdf.py, on MuPDF's story engine
+
+This module is what the two have in common, and where the promises a desktop
+tool has to keep are made:
+
+- The file's first bytes decide what it is, not its name. A PDF saved as
+  "scan.docx" still converts as a PDF, and a Word file renamed "cv.pdf" is
+  refused rather than turned into nonsense.
+- An existing file is never replaced unless the caller asks. The new one takes
   the next free name instead: "report (1).docx".
-- A conversion that fails partway leaves nothing behind. The DOCX is written to
-  a temporary file beside its destination and renamed into place only once it
-  is complete.
-- Pages pdf2docx could not convert are reported. Left to its defaults it logs
-  the failure and carries on, and the DOCX comes out a page short with nothing
-  on screen to say so.
+- A conversion that fails partway leaves nothing behind. Output is written to a
+  temporary file beside its destination and renamed into place only once it is
+  complete.
+- Whatever an engine could not carry over -- a page it failed to parse, a
+  header it cannot draw -- comes back with the result instead of going quiet.
 """
 
 from __future__ import annotations
 
-import logging
+import importlib
 import os
 import uuid
-from dataclasses import dataclass
+import zipfile
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from pdf2docx import Converter
 
 # The PDF header may sit anywhere in the first kilobyte. Acrobat accepts that,
 # so MuPDF does, and so does this check.
 _HEADER_WINDOW = 1024
 
+# The binary .doc format Word wrote until 2007, which DocShift cannot read.
+_OLE_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+
 
 class ConversionError(RuntimeError):
     """A conversion could not be done. The message is written for the user."""
+
+
+@dataclass(frozen=True)
+class Conversion:
+    """One direction DocShift converts in."""
+
+    name: str  # "PDF to DOCX", as the button and the status line say it
+    target_suffix: str
+    engine: str  # the module whose run() does the work
+
+    def run(self, source: Path, target: Path) -> Outcome:
+        # Imported on use, not at startup: pdf2docx brings NumPy and OpenCV with
+        # it, and converting one way should never load the other way's engine.
+        return importlib.import_module(self.engine).run(source, target)
+
+
+PDF_TO_DOCX = Conversion("PDF to DOCX", ".docx", "docshift.core.pdf_to_docx")
+DOCX_TO_PDF = Conversion("DOCX to PDF", ".pdf", "docshift.core.docx_to_pdf")
+
+
+@dataclass(frozen=True)
+class Outcome:
+    """What an engine did with one file."""
+
+    pages: int
+    # Pages the engine could not convert, numbered from 1. They are missing
+    # from the output.
+    skipped: tuple[int, ...] = ()
+    # Anything else the user should know, as whole sentences: what was in the
+    # document that could not be carried across.
+    notes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -42,79 +79,94 @@ class Result:
 
     output: Path
     pages: int
-    # Pages pdf2docx could not convert, numbered from 1. They are missing from
-    # the DOCX. Empty when the conversion is complete.
+    conversion: Conversion
     skipped: tuple[int, ...] = ()
+    notes: tuple[str, ...] = field(default=())
 
     @property
     def complete(self) -> bool:
         return not self.skipped
 
 
-def pdf_to_docx(
+def convert(
     source: str | os.PathLike[str],
     output_dir: str | os.PathLike[str] | None = None,
     *,
     overwrite: bool = False,
 ) -> Result:
-    """Convert one PDF to a DOCX named after it.
+    """Convert one file into the other format, named after it.
 
-    The DOCX goes into `output_dir`, which is created if it does not exist, or
-    beside the PDF when no folder is given.
+    The result goes into `output_dir`, which is created if it does not exist,
+    or beside the original when no folder is given.
     """
-    pdf = check_pdf(source)
-    folder = _prepare_folder(Path(output_dir) if output_dir else pdf.parent)
-    engine = _load_engine()
+    path, conversion = check_input(source)
+    folder = _prepare_folder(Path(output_dir) if output_dir else path.parent)
 
+    partial = _temporary_file(folder, conversion.target_suffix)
     try:
-        converter = engine(str(pdf))
-    except Exception as exc:
-        # MuPDF's own errors: a damaged file, or one that only starts like a PDF.
-        raise ConversionError(f"{pdf.name} could not be opened. It may be damaged. ({exc})") from exc
-
-    try:
-        return _convert(converter, pdf, folder, overwrite)
+        outcome = conversion.run(path, partial)
+        target = output_path(path, folder, conversion.target_suffix, overwrite=overwrite)
+        _rename(partial, target)
     finally:
-        converter.close()
+        # Already gone once the rename succeeded. Otherwise it is a failed
+        # conversion's half-written file, and nobody asked for that.
+        _discard(partial)
+
+    return Result(
+        output=target,
+        pages=outcome.pages,
+        conversion=conversion,
+        skipped=outcome.skipped,
+        notes=outcome.notes,
+    )
 
 
-def check_pdf(source: str | os.PathLike[str]) -> Path:
-    """Return `source` as a Path, or raise ConversionError if it is not a PDF.
+def check_input(source: str | os.PathLike[str]) -> tuple[Path, Conversion]:
+    """Return the file and the direction it converts in.
 
-    Reads the file's first bytes rather than trusting its extension: a PDF saved
-    as "scan.PDF" or just "scan" is still a PDF, and a Word file renamed to
-    "cv.pdf" is not.
+    Reads the first bytes rather than trusting the extension: a PDF saved as
+    "scan.PDF" or just "scan" is still a PDF, and a Word file renamed to
+    "cv.pdf" is not one.
     """
-    pdf = Path(source).expanduser()
-    if not pdf.exists():
-        raise ConversionError(f"Cannot find {pdf}.")
-    if pdf.is_dir():
-        raise ConversionError(f"{pdf} is a folder, not a PDF.")
+    path = Path(source).expanduser()
+    if not path.exists():
+        raise ConversionError(f"Cannot find {path}.")
+    if path.is_dir():
+        raise ConversionError(f"{path} is a folder, not a document.")
     try:
-        with pdf.open("rb") as handle:
+        with path.open("rb") as handle:
             head = handle.read(_HEADER_WINDOW)
     except OSError as exc:
-        raise ConversionError(f"{pdf.name} could not be read: {exc.strerror or exc}") from exc
-    if b"%PDF-" not in head:
-        raise ConversionError(f"{pdf.name} is not a PDF.")
-    return pdf
+        raise ConversionError(f"{path.name} could not be read: {exc.strerror or exc}") from exc
+
+    if b"%PDF-" in head:
+        return path, PDF_TO_DOCX
+    if head[:2] == b"PK" and _is_word_document(path):
+        return path, DOCX_TO_PDF
+    if head.startswith(_OLE_MAGIC):
+        raise ConversionError(
+            f"{path.name} is in Word's older .doc format. Open it, save it as "
+            f".docx, and try again."
+        )
+    raise ConversionError(f"{path.name} is not a PDF or a Word document.")
 
 
-def output_path(pdf: Path, folder: Path, *, overwrite: bool = False) -> Path:
-    """Where the DOCX for `pdf` goes.
+def output_path(source: Path, folder: Path, suffix: str, *, overwrite: bool = False) -> Path:
+    """Where the conversion of `source` goes.
 
     `folder/report.docx`, unless that exists and `overwrite` is off, in which
     case the first free one of `report (1).docx`, `report (2).docx`, ...
     """
-    target = folder / f"{pdf.stem}.docx"
-    # Replacing is never allowed to land on the PDF itself. That can only happen
-    # to a PDF saved with a .docx extension -- and it would destroy the only copy.
-    if overwrite and not _same_file(target, pdf):
+    target = folder / f"{source.stem}{suffix}"
+    # Replacing is never allowed to land on the original. That only happens to a
+    # file saved under the other format's extension, which is exactly the case
+    # where it would destroy the only copy.
+    if overwrite and not _same_file(target, source):
         return target
     number = 0
     while target.exists():
         number += 1
-        target = folder / f"{pdf.stem} ({number}).docx"
+        target = folder / f"{source.stem} ({number}){suffix}"
     return target
 
 
@@ -126,41 +178,17 @@ def describe_pages(numbers: tuple[int, ...] | list[int]) -> str:
     return f"pages {listed} and {numbers[-1]}"
 
 
-def _convert(converter: Converter, pdf: Path, folder: Path, overwrite: bool) -> Result:
-    document = converter.fitz_doc
-    if document.needs_pass:
-        raise ConversionError(
-            f"{pdf.name} is password-protected. Remove the password and try again."
-        )
-    if document.page_count == 0:
-        # What MuPDF makes of a file that starts like a PDF and is not one: it
-        # "repairs" it into a document with nothing in it.
-        raise ConversionError(f"{pdf.name} has no pages. It may be damaged.")
+def _is_word_document(path: Path) -> bool:
+    """True for a .docx: a zip with Word's main document part inside.
 
-    partial = _temporary_file(folder)
+    Every Office file is a zip, so the zip alone proves nothing -- a spreadsheet
+    or a slide deck gets this far.
+    """
     try:
-        try:
-            converter.convert(str(partial))
-        except Exception as exc:
-            raise ConversionError(_describe_failure(converter, pdf, exc)) from exc
-        target = output_path(pdf, folder, overwrite=overwrite)
-        replacing = target.exists()
-        try:
-            os.replace(partial, target)
-        except OSError as exc:
-            if replacing:
-                # On Windows this is almost always the old DOCX, open in Word.
-                raise ConversionError(
-                    f"{target.name} could not be replaced. If it is open in another "
-                    f"program, close it and try again."
-                ) from exc
-            raise ConversionError(f"{target.name} could not be saved: {exc.strerror or exc}") from exc
-    finally:
-        # Already gone when the rename succeeded. Otherwise it is a failed
-        # conversion's half-written file, and nobody asked for it.
-        partial.unlink(missing_ok=True)
-
-    return Result(output=target, pages=document.page_count, skipped=_skipped_pages(converter))
+        with zipfile.ZipFile(path) as archive:
+            return "word/document.xml" in archive.namelist()
+    except (zipfile.BadZipFile, OSError):
+        return False
 
 
 def _prepare_folder(folder: Path) -> Path:
@@ -174,13 +202,13 @@ def _prepare_folder(folder: Path) -> Path:
     return folder
 
 
-def _temporary_file(folder: Path) -> Path:
-    """Create an empty file in `folder` for the DOCX to be written into.
+def _temporary_file(folder: Path, suffix: str) -> Path:
+    """Create an empty file in `folder` for the conversion to be written into.
 
     Made here rather than with tempfile.mkstemp, which creates files only their
-    owner can read -- and the rename would pass that on to the finished DOCX.
+    owner can read -- and the rename would pass that on to the finished file.
     """
-    partial = folder / f".docshift-{uuid.uuid4().hex[:12]}.docx.part"
+    partial = folder / f".docshift-{uuid.uuid4().hex[:12]}{suffix}.part"
     try:
         partial.open("xb").close()
     except OSError as exc:
@@ -188,65 +216,32 @@ def _temporary_file(folder: Path) -> Path:
     return partial
 
 
+def _rename(partial: Path, target: Path) -> None:
+    replacing = target.exists()
+    try:
+        os.replace(partial, target)
+    except OSError as exc:
+        if replacing:
+            # On Windows this is almost always the old file, open in Word.
+            raise ConversionError(
+                f"{target.name} could not be replaced. If it is open in another "
+                f"program, close it and try again."
+            ) from exc
+        raise ConversionError(f"{target.name} could not be saved: {exc.strerror or exc}") from exc
+
+
 def _same_file(a: Path, b: Path) -> bool:
     return a.exists() and b.exists() and os.path.samefile(a, b)
 
 
-def _skipped_pages(converter: Converter) -> tuple[int, ...]:
-    """Pages pdf2docx was asked to convert and could not, numbered from 1.
+def _discard(partial: Path) -> None:
+    """Remove the half-written file, if it can be removed.
 
-    A page that parsed is `finalized`. Under pdf2docx's default of
-    ignore_page_error=True, one that failed is logged and left out, and
-    convert() returns as though nothing had happened.
+    An engine that failed may still hold its own output open, and Windows will
+    not unlink an open file. The error already on its way up is the one that
+    matters; a leftover temporary file is not worth replacing it with.
     """
-    return tuple(
-        page.id + 1 for page in converter.pages if not page.skip_parsing and not page.finalized
-    )
-
-
-def _describe_failure(converter: Converter, pdf: Path, exc: Exception) -> str:
-    wanted = [page for page in converter.pages if not page.skip_parsing]
-    if wanted and not any(page.finalized for page in wanted):
-        # Every page failed and pdf2docx has nothing to write. Its own message,
-        # "No parsed pages. Please parse page first.", means nothing to a user.
-        if len(wanted) == 1:
-            return f"{pdf.name} has one page, and it could not be converted."
-        return f"None of the {len(wanted)} pages in {pdf.name} could be converted."
-    return f"{pdf.name} could not be converted. ({exc})"
-
-
-def _load_engine() -> type[Converter]:
-    """Import pdf2docx's Converter without letting the import rewire the program.
-
-    Importing pdf2docx has two side effects, both undone here:
-
-    - It calls logging.basicConfig(level=INFO), taking over the root logger of
-      whatever program imported it, so every conversion would print progress.
-    - PyMuPDF prints straight to stdout -- including a deprecation warning that
-      pdf2docx sets off by importing it under its old name, `fitz`. The command
-      line prints the path of each DOCX on stdout, which has to stay clean, so
-      PyMuPDF's messages go to the "pymupdf" logger at INFO. --verbose shows them.
-
-    It happens on first use rather than at import time: pdf2docx brings NumPy,
-    OpenCV and MuPDF with it, and the window should not wait on them to appear.
-    """
-    root = logging.getLogger()
-    handlers, level = root.handlers[:], root.level
     try:
-        import pymupdf
-
-        pymupdf.set_messages(pylogging_name="pymupdf", pylogging_level=logging.INFO)
-        from pdf2docx import Converter
-    except ImportError as exc:
-        raise ConversionError(
-            f"The conversion engine is not installed ({exc.name} is missing). "
-            f"Run: pip install -r requirements.txt"
-        ) from exc
-    except SystemExit as exc:
-        # pdf2docx calls sys.exit() when it dislikes the installed PyMuPDF. That
-        # should end one conversion, not the whole program.
-        raise ConversionError(f"The conversion engine could not start: {exc}") from None
-    finally:
-        root.handlers[:] = handlers
-        root.setLevel(level)
-    return Converter
+        partial.unlink(missing_ok=True)
+    except OSError:
+        pass

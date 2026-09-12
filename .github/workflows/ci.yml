@@ -62,12 +62,12 @@ jobs:
         # Catches syntax errors and bad imports in paths the tests do not
         # reach. The first upload of this project never got past this point:
         # its window module did not parse.
-        run: python -c "import docshift, docshift.__main__, docshift.cli, docshift.core.convert, docshift.gui.app, docshift.gui.style, docshift.gui.window; print('all modules import')"
+        run: python -c "import docshift, docshift.__main__, docshift.cli, docshift.core.convert, docshift.core.pdf_to_docx, docshift.core.docx_to_pdf, docshift.gui.app, docshift.gui.style, docshift.gui.window; print('all modules import')"
 
       - name: Test
         run: python -m pytest -q
 
-      - name: Convert a real PDF, as a user would
+      - name: Convert real files both ways, as a user would
         run: python packaging/smoke_test.py python -m docshift
 
   windows:
@@ -105,9 +105,10 @@ jobs:
       - name: Build
         run: pyinstaller --noconfirm --clean packaging/docshift.spec
 
-      - name: The .exe converts a real PDF
+      - name: The .exe converts real files, both ways
         # The bundled .exe, not the source: this is what catches a library
-        # PyInstaller left out, which no test above can see.
+        # PyInstaller left out, which no test above can see -- python-docx's
+        # templates and MuPDF's story engine among them.
         run: python packaging/smoke_test.py dist/DocShift.exe
 
       - name: Package

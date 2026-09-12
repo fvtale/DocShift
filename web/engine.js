@@ -67,9 +67,13 @@ export async function startEngine({
 
   onStatus("Loading the conversion engine");
   const web = pyodide.pyimport("docshift_web");
-  // Import pdf2docx, NumPy, OpenCV and MuPDF now rather than on the first
-  // conversion, which should start the moment someone presses Convert.
-  pyodide.runPython("from docshift.core.convert import _load_engine; _load_engine()");
+  // Load both engines -- pdf2docx with NumPy, OpenCV and MuPDF behind it, and
+  // the Word reader -- now rather than on the first conversion, which should
+  // start the moment someone presses Convert.
+  pyodide.runPython(
+    "from docshift.core.pdf_to_docx import _load_engine; _load_engine()\n" +
+      "import docshift.core.docx_to_pdf\n",
+  );
 
   return {
     manifest,
@@ -78,7 +82,7 @@ export async function startEngine({
     // Runs synchronously inside Python. In the browser that is the worker's
     // thread, never the page's, so the page stays responsive throughout.
     convert(name, bytes, onProgress = () => {}) {
-      const result = web.convert(name, bytes, onProgress);
+      const result = web.convert_bytes(name, bytes, onProgress);
       try {
         return result.toJs({ dict_converter: Object.fromEntries });
       } finally {

@@ -50,8 +50,8 @@ self.onmessage = async ({ data }) => {
   if (data.type === "convert") {
     try {
       const result = ready.convert(data.name, data.bytes, (text) => postMessage({ type: "status", text }));
-      // Hand the DOCX over rather than copying it.
-      postMessage({ type: "result", ...result }, result.docx ? [result.docx.buffer] : []);
+      // Hand the converted file over rather than copying it.
+      postMessage({ type: "result", ...result }, result.data ? [result.data.buffer] : []);
     } catch (error) {
       // A bug in DocShift, or the tab running out of memory on a huge PDF --
       // not a bad file, which comes back as a result with ok: false. Python

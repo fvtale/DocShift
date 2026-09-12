@@ -24,6 +24,12 @@ a = Analysis(
     # docshift/gui/app.py loads the icon from beside itself, so it goes in
     # the same place inside the .exe.
     datas=[(str(ICON), "docshift/gui")],
+    # The engines. core/convert.py reaches them through importlib by name, so
+    # that converting one way never loads the other way's libraries -- and a
+    # name assembled at run time is invisible to PyInstaller, which reads the
+    # code without running it. Without these two lines the .exe builds happily
+    # and then cannot convert anything at all.
+    hiddenimports=["docshift.core.pdf_to_docx", "docshift.core.docx_to_pdf"],
     # pdf2docx ships a Tk interface of its own that DocShift never opens.
     # Without this, Tcl/Tk rides along in every download.
     excludes=["tkinter", "pdf2docx.gui"],

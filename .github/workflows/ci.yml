@@ -1,0 +1,158 @@
+name: CI
+
+# Nothing here is built or run on the author's machine -- there is no local
+# Python toolchain. This workflow is the only thing that tests DocShift, and
+# the Windows job is the only place DocShift.exe is ever built. Treat a red run
+# as a broken download.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # Mondays. pdf2docx pins nothing it depends on, and PyMuPDF has announced it
+    # will drop the `fitz` name that pdf2docx still imports. When a dependency
+    # moves under this project, this run finds out -- not a user.
+    - cron: "17 9 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The .exe is built on 3.12. The range catches anything that would
+        # break when the runner image or a dependency moves.
+        python-version: ["3.11", "3.12", "3.13"]
+    env:
+      # Qt draws into memory instead of onto a display the runner does not have.
+      QT_QPA_PLATFORM: offscreen
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Qt's system libraries
+        # PySide6's wheels carry Qt itself but link against a few system
+        # libraries a bare runner does not have. Without them,
+        # `import PySide6.QtWidgets` fails on a missing .so -- which reads like
+        # a packaging bug and is not one.
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q libegl1 libgl1 libopengl0 libxkbcommon0 libfontconfig1 libdbus-1-3
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest ruff
+
+      - name: Lint
+        run: ruff check docshift tests packaging web
+
+      - name: Import every module
+        # Catches syntax errors and bad imports in paths the tests do not
+        # reach. The first upload of this project never got past this point:
+        # its window module did not parse.
+        run: python -c "import docshift, docshift.__main__, docshift.cli, docshift.core.convert, docshift.core.pdf_to_docx, docshift.core.docx_to_pdf, docshift.gui.app, docshift.gui.style, docshift.gui.window; print('all modules import')"
+
+      - name: Test
+        run: python -m pytest -q
+
+      - name: Convert real files both ways, as a user would
+        run: python packaging/smoke_test.py python -m docshift
+
+  windows:
+    name: DocShift.exe
+    needs: test
+    runs-on: windows-latest
+    defaults:
+      run:
+        # Not PowerShell: a PowerShell step only fails if its *last* command
+        # does, so a failed pip install on an earlier line would slip through.
+        shell: bash
+    env:
+      # For the test suite. The .exe smoke test never opens a window.
+      QT_QPA_PLATFORM: offscreen
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pyinstaller
+
+      - name: Test on Windows
+        # Windows is where DocShift is used, and it is where file locking,
+        # renames and paths differ from the Linux runs above.
+        run: python -m pytest -q
+
+      - name: Build
+        run: pyinstaller --noconfirm --clean packaging/docshift.spec
+
+      - name: The .exe converts real files, both ways
+        # The bundled .exe, not the source: this is what catches a library
+        # PyInstaller left out, which no test above can see -- python-docx's
+        # templates and MuPDF's story engine among them.
+        run: python packaging/smoke_test.py dist/DocShift.exe
+
+      - name: Package
+        run: |
+          mkdir release
+          cp dist/DocShift.exe LICENSE THIRD-PARTY-NOTICES.md release/
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: DocShift-windows
+          path: release/
+          if-no-files-found: error
+
+  web:
+    name: datarail.org/docshift
+    needs: test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Build the page
+        run: npm run build
+
+      - name: The page converts a real PDF
+        # dist/web is what gets deployed, and this runs it on the same Pyodide
+        # release the page loads from jsDelivr. Everything under the DOM -- the
+        # wheels, DocShift's engine, the conversion -- is what a visitor runs.
+        run: npm test
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: DocShift-web
+          # Copied into datarail-site/public/docshift to deploy it.
+          path: dist/web/
+          if-no-files-found: error

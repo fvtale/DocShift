@@ -1,0 +1,96 @@
+name: Release
+
+# Publishes DocShift.exe where anyone can download it: a GitHub release, whose
+# "latest" URL never changes, so datarail.org/docshift can link straight at it.
+#
+#   git tag v0.2.0 && git push origin v0.2.0
+#
+# CI builds the same .exe on every push, but its artifacts need a GitHub login
+# and expire after 90 days. A release is the copy meant for people who just
+# want the program.
+#
+# The build steps are deliberately the same as ci.yml's "DocShift.exe" job. If
+# one changes, change the other: nothing is published here that CI has not
+# already proved on the same commit.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build and publish"
+        required: true
+
+permissions:
+  contents: write # to create the release and upload the .exe to it
+
+jobs:
+  windows:
+    name: DocShift.exe
+    runs-on: windows-latest
+    defaults:
+      run:
+        # Not PowerShell: a PowerShell step only fails if its *last* command
+        # does, so a failed pip install on an earlier line would slip through.
+        shell: bash
+    env:
+      QT_QPA_PLATFORM: offscreen
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pyinstaller
+
+      - name: Test
+        run: python -m pytest -q
+
+      - name: Build
+        run: pyinstaller --noconfirm --clean packaging/docshift.spec
+
+      - name: The .exe converts real files, both ways
+        # Nothing is published that has not converted a real PDF and a real Word
+        # document first.
+        run: python packaging/smoke_test.py dist/DocShift.exe
+
+      - name: Package
+        run: |
+          mkdir release
+          cp dist/DocShift.exe LICENSE THIRD-PARTY-NOTICES.md release/
+          # Zipped rather than a bare .exe: the licences of everything inside it
+          # travel with it, which is what the AGPL and the LGPL ask for.
+          powershell -Command "Compress-Archive -Path release/* -DestinationPath DocShift-windows.zip"
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          # --clobber so re-running a tag replaces the file instead of failing.
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" DocShift-windows.zip --clobber
+          else
+            gh release create "$TAG" DocShift-windows.zip \
+              --title "DocShift $TAG" \
+              --notes "Windows build of DocShift $TAG.
+
+          Download **DocShift-windows.zip**, unzip it, and run \`DocShift.exe\`. No installer, no Python, nothing to sign up for.
+
+          Windows SmartScreen warns about an unknown publisher the first time, because the .exe is not code-signed: **More info -> Run anyway**.
+
+          Converts PDF to Word and Word to PDF, on your own machine. The same converter runs in a browser at <https://datarail.org/docshift>.
+
+          The .exe bundles PyMuPDF, which is licensed under the AGPL v3, so the build as a whole is distributed under the AGPL v3; DocShift's own source stays CC0. See THIRD-PARTY-NOTICES.md inside the zip."
+          fi
+          echo "::notice title=Published::$(gh release view "$TAG" --json url --jq .url)"

@@ -1,0 +1,10 @@
+# Windows checkouts get CRLF locally; everything committed and everything CI
+# checks out stays LF. Workflow files with shell heredocs break on CRLF.
+* text=auto eol=lf
+
+# The one exception. cmd.exe misreads labels and GOTOs in LF-only batch files,
+# so the Windows build script keeps Windows line endings even in the repo.
+*.bat text eol=crlf
+
+*.ico binary
+*.png binary

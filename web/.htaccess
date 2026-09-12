@@ -1,0 +1,13 @@
+# DocShift at datarail.org/docshift.
+#
+# The page, its scripts and engine.json must never be served stale: a new
+# app.js running against an old engine.js is a broken page. They are small, so
+# the browser revalidates them on every visit. The heavy part -- Python and the
+# PDF libraries, about 38 MB -- comes from jsDelivr under a versioned URL and is
+# cached for good. The wheels carry their version in their names, so a new one
+# is a new file and ordinary caching is safe.
+<IfModule mod_headers.c>
+  <FilesMatch "\.(html|js|json)$">
+    Header set Cache-Control "no-cache, must-revalidate"
+  </FilesMatch>
+</IfModule>
